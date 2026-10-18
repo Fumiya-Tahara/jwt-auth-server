@@ -1,6 +1,9 @@
 package jwt
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const (
 	secret = "your-256-bit-secret"
@@ -29,6 +32,44 @@ func TestSign(t *testing.T) {
 		}
 		if got != sampleToken {
 			t.Errorf("Sign() =\n  %s\nwant\n  %s", got, sampleToken)
+		}
+	})
+}
+
+func TestVerify(t *testing.T) {
+	t.Run("valid token", func(t *testing.T) {
+		if err := Verify(sampleToken, []byte(secret)); err != nil {
+			t.Errorf("Verify() error = %v, want nil", err)
+		}
+	})
+
+	t.Run("tampered payload", func(t *testing.T) {
+		// 別の payload に差し替え、署名は元のまま使い回す(攻撃者がやること)
+		other, err := Sign(claims{Sub: "admin", Name: "John Doe", Iat: 1516239022}, []byte(secret))
+		if err != nil {
+			t.Fatalf("Sign() error = %v", err)
+		}
+		orig := strings.Split(sampleToken, ".")
+		forged := strings.Split(other, ".")
+		tampered := orig[0] + "." + forged[1] + "." + orig[2]
+
+		if err := Verify(tampered, []byte(secret)); err == nil {
+			t.Error("Verify() error = nil, want error")
+		}
+	})
+
+	t.Run("wrong key", func(t *testing.T) {
+		if err := Verify(sampleToken, []byte("wrong-key")); err == nil {
+			t.Error("Verify() error = nil, want error")
+		}
+	})
+
+	t.Run("garbage signature", func(t *testing.T) {
+		orig := strings.Split(sampleToken, ".")
+		garbage := orig[0] + "." + orig[1] + ".AAAA"
+
+		if err := Verify(garbage, []byte(secret)); err == nil {
+			t.Error("Verify() error = nil, want error")
 		}
 	})
 }

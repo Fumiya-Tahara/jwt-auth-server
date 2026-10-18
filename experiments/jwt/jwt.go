@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // header は固定。空白やキー順が変わると署名も変わる。
@@ -25,9 +26,10 @@ func Sign(payload any, key []byte) (string, error) {
 	return signingInput + "." + encode(computeSignature(signingInput, key)), nil
 }
 
-// Verify はトークンの署名が key で作られたものかを検証する。
-// 検証に使うのはトークン自身の header.payload と key だけで、サーバー側に正解は保存しない。
-func Verify(token string, key []byte) error {
+// Verify はトークンの署名が key で作られたものかを検証し、有効期限(exp)を過ぎていないかを確認する。
+// 署名の検証に使うのはトークン自身の header.payload と key だけで、サーバー側に正解は保存しない。
+// exp が無いトークンは期限なしとして扱う(RFC 7519 で exp は任意)。
+func Verify(token string, key []byte, now time.Time) error {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return errors.New("jwt: malformed token")
@@ -44,6 +46,30 @@ func Verify(token string, key []byte) error {
 	// hmac.Equal は一定時間で比較する。
 	if !hmac.Equal(got, want) {
 		return errors.New("jwt: invalid signature")
+	}
+
+	// payload は署名が合ったあとで初めて信用できるので、exp の確認は署名検証のあとに行う。
+	return checkExpiration(parts[1], now)
+}
+
+// checkExpiration は payload(エンコード済み)の exp を見て、now が exp より前かを確認する。
+func checkExpiration(encodedPayload string, now time.Time) error {
+	raw, err := base64.RawURLEncoding.DecodeString(encodedPayload)
+	if err != nil {
+		return fmt.Errorf("jwt: malformed payload: %w", err)
+	}
+
+	// *int64 にして、exp が「無い」ことと 0 であることを区別する。
+	var c struct {
+		Exp *int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return fmt.Errorf("jwt: malformed payload: %w", err)
+	}
+
+	// 仕様では「現在時刻は exp より前でなければならない」ので、同時刻も期限切れ。
+	if c.Exp != nil && now.Unix() >= *c.Exp {
+		return errors.New("jwt: token expired")
 	}
 	return nil
 }

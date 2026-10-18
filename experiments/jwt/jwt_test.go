@@ -3,6 +3,7 @@ package jwt
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -13,6 +14,15 @@ const (
 		"eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ." +
 		"SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
 )
+
+// Verify に渡す「現在時刻」。テストでは固定値を使い、sleep を不要にする。
+var now = time.Unix(1_700_000_000, 0)
+
+// 有効期限つきの payload。
+type expiringClaims struct {
+	Sub string `json:"sub"`
+	Exp int64  `json:"exp"`
+}
 
 // フィールドの宣言順がそのまま JSON のキー順になる。
 // キー順や空白が変わると payload のバイト列が変わり、署名も変わる。
@@ -38,7 +48,7 @@ func TestSign(t *testing.T) {
 
 func TestVerify(t *testing.T) {
 	t.Run("valid token", func(t *testing.T) {
-		if err := Verify(sampleToken, []byte(secret)); err != nil {
+		if err := Verify(sampleToken, []byte(secret), now); err != nil {
 			t.Errorf("Verify() error = %v, want nil", err)
 		}
 	})
@@ -53,13 +63,13 @@ func TestVerify(t *testing.T) {
 		forged := strings.Split(other, ".")
 		tampered := orig[0] + "." + forged[1] + "." + orig[2]
 
-		if err := Verify(tampered, []byte(secret)); err == nil {
+		if err := Verify(tampered, []byte(secret), now); err == nil {
 			t.Error("Verify() error = nil, want error")
 		}
 	})
 
 	t.Run("wrong key", func(t *testing.T) {
-		if err := Verify(sampleToken, []byte("wrong-key")); err == nil {
+		if err := Verify(sampleToken, []byte("wrong-key"), now); err == nil {
 			t.Error("Verify() error = nil, want error")
 		}
 	})
@@ -68,7 +78,7 @@ func TestVerify(t *testing.T) {
 		orig := strings.Split(sampleToken, ".")
 		garbage := orig[0] + "." + orig[1] + ".AAAA"
 
-		if err := Verify(garbage, []byte(secret)); err == nil {
+		if err := Verify(garbage, []byte(secret), now); err == nil {
 			t.Error("Verify() error = nil, want error")
 		}
 	})
@@ -89,8 +99,33 @@ func TestVerify(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				if err := Verify(tt.token, []byte(secret)); err == nil {
+				if err := Verify(tt.token, []byte(secret), now); err == nil {
 					t.Error("Verify() error = nil, want error")
+				}
+			})
+		}
+	})
+
+	t.Run("expiration", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			exp     int64
+			wantErr bool
+		}{
+			{"expired", now.Unix() - 1, true},
+			{"expires exactly now", now.Unix(), true},
+			{"not yet expired", now.Unix() + 1, false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				token, err := Sign(expiringClaims{Sub: "1234567890", Exp: tt.exp}, []byte(secret))
+				if err != nil {
+					t.Fatalf("Sign() error = %v", err)
+				}
+
+				err = Verify(token, []byte(secret), now)
+				if (err != nil) != tt.wantErr {
+					t.Errorf("Verify() error = %v, wantErr %v", err, tt.wantErr)
 				}
 			})
 		}

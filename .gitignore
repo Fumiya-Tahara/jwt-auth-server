@@ -12,3 +12,6 @@ jwt-auth-server
 .DS_Store
 .idea/
 .vscode/
+
+# air
+tmp/

@@ -72,4 +72,27 @@ func TestVerify(t *testing.T) {
 			t.Error("Verify() error = nil, want error")
 		}
 	})
+
+	t.Run("malformed token", func(t *testing.T) {
+		parts := strings.Split(sampleToken, ".")
+
+		tests := []struct {
+			name  string
+			token string
+		}{
+			{"empty", ""},
+			{"no dot", "abc"},
+			{"two parts", parts[0] + "." + parts[1]},
+			{"four parts", sampleToken + ".extra"},
+			{"empty signature", parts[0] + "." + parts[1] + "."},
+			{"signature is not base64url", parts[0] + "." + parts[1] + ".!!!"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if err := Verify(tt.token, []byte(secret)); err == nil {
+					t.Error("Verify() error = nil, want error")
+				}
+			})
+		}
+	})
 }
